@@ -493,10 +493,12 @@ impl UnitTestRunner<'_, '_, '_> {
             mut max_deviation,
         } = strategy;
 
+        let mut page_range = None;
         for annot in self.test.annotations().iter() {
             match annot {
                 Annotation::MaxDelta(set) => max_delta = *set,
                 Annotation::MaxDeviations(set) => max_deviation = *set,
+                Annotation::Page(set) => page_range = Some(set.clone()),
                 _ => {}
             }
         }
@@ -508,6 +510,7 @@ impl UnitTestRunner<'_, '_, '_> {
                 max_delta,
                 max_deviation,
             },
+            page_range,
         ) {
             self.result.set_failed_comparison(error);
             eyre::bail!(TestFailure);

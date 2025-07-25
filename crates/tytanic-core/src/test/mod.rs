@@ -13,6 +13,7 @@ use crate::doc::compile;
 
 mod annotation;
 mod id;
+pub mod range;
 pub mod template;
 pub mod unit;
 
@@ -20,6 +21,8 @@ pub use self::annotation::Annotation;
 pub use self::annotation::ParseAnnotationError;
 pub use self::id::Id;
 pub use self::id::ParseIdError;
+pub use self::range::PageSelections;
+pub use self::range::ParsePageRangeError;
 pub use self::template::Test as TemplateTest;
 pub use self::unit::Test as UnitTest;
 

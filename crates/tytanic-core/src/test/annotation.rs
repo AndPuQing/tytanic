@@ -26,6 +26,7 @@ use ecow::EcoVec;
 use thiserror::Error;
 
 use crate::config::Direction;
+use crate::test::range::PageSelections;
 
 /// An error which may occur while parsing an annotation.
 #[derive(Debug, Error)]
@@ -73,6 +74,9 @@ pub enum Annotation {
 
     /// The maximum allowed amount of deviations to use for comparison.
     MaxDeviations(usize),
+
+    /// The page range to use for comparison.
+    Page(PageSelections),
 }
 
 impl Annotation {
@@ -154,6 +158,13 @@ impl FromStr for Annotation {
                 },
                 None => Err(ParseAnnotationError::MissingArg("max-deviations")),
             },
+            "page" => match arg {
+                Some(arg) => match arg.trim().parse() {
+                    Ok(arg) => Ok(Annotation::Page(arg)),
+                    Err(err) => Err(ParseAnnotationError::Other(err.into())),
+                },
+                None => Err(ParseAnnotationError::MissingArg("page")),
+            },
             _ => Err(ParseAnnotationError::Unknown(id.into())),
         }
     }
@@ -161,6 +172,12 @@ impl FromStr for Annotation {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroUsize;
+
+    use crate::test::range::PageRange;
+    use crate::test::range::PageSelection;
+    use crate::test::PageSelections;
+
     use super::*;
 
     #[test]
@@ -193,6 +210,20 @@ mod tests {
         assert_eq!(
             Annotation::from_str("[ppi: 42.5]").unwrap(),
             Annotation::Ppi(42.5)
+        );
+    }
+
+    #[test]
+    fn test_annotation_page() {
+        assert_eq!(
+            Annotation::from_str("[page: \"1-2, 4\"]").unwrap(),
+            Annotation::Page(PageSelections(vec![
+                PageSelection::Range(PageRange {
+                    start: NonZeroUsize::new(1).unwrap(),
+                    end: NonZeroUsize::new(2).unwrap(),
+                }),
+                PageSelection::Single(NonZeroUsize::new(4).unwrap()),
+            ]))
         );
     }
 

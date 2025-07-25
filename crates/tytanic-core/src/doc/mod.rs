@@ -26,6 +26,8 @@ pub mod compare;
 pub mod compile;
 pub mod render;
 
+use crate::test::PageSelections;
+
 /// The extension used in the page storage, each page is stored separately with it.
 pub const PAGE_EXTENSION: &str = "png";
 
@@ -217,20 +219,41 @@ impl Document {
         outputs: &Self,
         references: &Self,
         strategy: Strategy,
+        page_selections: Option<PageSelections>,
     ) -> Result<(), compare::Error> {
-        let output_len = outputs.buffers.len();
-        let reference_len = references.buffers.len();
+        let (page_errors, output_len, reference_len) = if let Some(page_selections) =
+            page_selections
+        {
+            let outputs_filtered: Vec<_> = outputs
+                .buffers
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| page_selections.contains(*i))
+                .collect();
+            let references_filtered: Vec<_> = references
+                .buffers
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| page_selections.contains(*i))
+                .collect();
 
-        let mut page_errors = Vec::with_capacity(Ord::min(output_len, reference_len));
+            let errors = iter::zip(outputs_filtered.iter(), references_filtered.iter())
+                .filter_map(|((idx, a), (_, b))| {
+                    compare::page(a, b, strategy).err().map(|e| (*idx, e))
+                })
+                .collect::<Vec<_>>();
 
-        for (idx, (a, b)) in iter::zip(&outputs.buffers, &references.buffers).enumerate() {
-            if let Err(err) = compare::page(a, b, strategy) {
-                page_errors.push((idx, err));
-            }
-        }
+            (errors, outputs_filtered.len(), references_filtered.len())
+        } else {
+            let errors = iter::zip(&outputs.buffers, &references.buffers)
+                .enumerate()
+                .filter_map(|(idx, (a, b))| compare::page(a, b, strategy).err().map(|e| (idx, e)))
+                .collect::<Vec<_>>();
+
+            (errors, outputs.buffers.len(), references.buffers.len())
+        };
 
         if !page_errors.is_empty() || output_len != reference_len {
-            page_errors.shrink_to_fit();
             return Err(compare::Error {
                 output: output_len,
                 reference: reference_len,
@@ -280,6 +303,7 @@ mod tests {
     use tytanic_utils::fs::TempTestEnv;
 
     use super::*;
+    use crate::doc::compare::PageError;
 
     #[test]
     fn test_document_save() {
@@ -319,5 +343,64 @@ mod tests {
                 assert_eq!(doc.buffers[2], buffers[2]);
             },
         );
+    }
+
+    #[test]
+    fn test_document_compare_with_page_range() {
+        let mut output_buffers_vec = vec![Pixmap::new(10, 10).unwrap(); 5];
+        output_buffers_vec[2] = Pixmap::new(12, 12).unwrap();
+        let output_buffers = EcoVec::from(output_buffers_vec);
+
+        let reference_buffers = eco_vec![Pixmap::new(10, 10).unwrap(); 5];
+
+        let output = Document::new(output_buffers);
+        let reference = Document::new(reference_buffers);
+
+        // Test case 1: No page range, should fail on page 3
+        let result = Document::compare(&output, &reference, Strategy::default(), None);
+        assert!(matches!(
+            result,
+            Err(compare::Error {
+                pages, ..
+            }) if matches!(&pages[..], [(_, PageError::Dimensions { .. })])
+        ));
+
+        // Test case 2: Page range including the different page, should fail
+        let selections = "1-3".parse::<PageSelections>().unwrap();
+        let result = Document::compare(&output, &reference, Strategy::default(), Some(selections));
+        assert!(matches!(
+            result,
+            Err(compare::Error {
+                pages, ..
+            }) if matches!(&pages[..], [(_, PageError::Dimensions { .. })])
+        ));
+
+        // Test case 3: Page range excluding the different page, should pass
+        let selections = "1-2".parse::<PageSelections>().unwrap();
+        assert!(
+            Document::compare(&output, &reference, Strategy::default(), Some(selections)).is_ok()
+        );
+
+        // Test case 4: Page range for a single page that is different, should fail
+        let selections = "3".parse::<PageSelections>().unwrap();
+        let result = Document::compare(&output, &reference, Strategy::default(), Some(selections));
+        assert!(matches!(
+            result,
+            Err(compare::Error {
+                pages, ..
+            }) if matches!(&pages[..], [(_, PageError::Dimensions { .. })])
+        ));
+
+        // Test case 5: Different page counts, should fail
+        let reference_short = Document::new(eco_vec![Pixmap::new(10, 10).unwrap(); 4]);
+        let result = Document::compare(&output, &reference_short, Strategy::default(), None);
+        assert!(matches!(
+            result,
+            Err(compare::Error {
+                output: 5,
+                reference: 4,
+                ..
+            })
+        ));
     }
 }
